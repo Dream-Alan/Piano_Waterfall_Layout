@@ -44,9 +44,9 @@ dev = [
 piano-waterfall = "piano_waterfall.app:main"
 
 [project.urls]
-Homepage = "https://github.com/Dream-Alan/piano-waterfall"
-Repository = "https://github.com/Dream-Alan/piano-waterfall"
-Issues = "https://github.com/Dream-Alan/piano-waterfall/issues"
+Homepage = "https://github.com/Dream-Alan/Piano_Waterfall_Layout"
+Repository = "https://github.com/Dream-Alan/Piano_Waterfall_Layout"
+Issues = "https://github.com/Dream-Alan/Piano_Waterfall_Layout/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

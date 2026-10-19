@@ -56,7 +56,7 @@ from .workers import ModelDownloadWorker, RenderWorker, TranscriptionWorker
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
 APP_VERSION = "1.3.0"
-GITHUB_URL = "https://github.com/Dream-Alan/piano-waterfall"
+GITHUB_URL = "https://github.com/Dream-Alan/Piano_Waterfall_Layout"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
 AUDIO_SUFFIXES = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}

@@ -31,7 +31,7 @@ NUM_NOTE = 88
 THRESHOLD = 0.5
 MODEL_NAME = "hft_transformer.onnx"
 MODEL_URL = (
-    "https://raw.githubusercontent.com/Dream-Alan/piano-waterfall/main/"
+    "https://raw.githubusercontent.com/Dream-Alan/Piano_Waterfall_Layout/main/"
     "src/piano_waterfall/assets/models/hft_transformer.onnx"
 )
 MODEL_ENV = "PIANO_WATERFALL_MODEL"

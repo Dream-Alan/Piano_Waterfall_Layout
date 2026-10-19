@@ -9,8 +9,8 @@
   <img alt="Qt" src="https://img.shields.io/badge/Qt-PySide6-41CD52?logo=qt&logoColor=white">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c8eda">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-2ea44f">
-  <a href="https://github.com/Dream-Alan/piano-waterfall/actions/workflows/tests.yml">
-    <img alt="tests" src="https://github.com/Dream-Alan/piano-waterfall/actions/workflows/tests.yml/badge.svg">
+  <a href="https://github.com/Dream-Alan/Piano_Waterfall_Layout/actions/workflows/tests.yml">
+    <img alt="tests" src="https://github.com/Dream-Alan/Piano_Waterfall_Layout/actions/workflows/tests.yml/badge.svg">
   </a>
 </p>
 
@@ -40,7 +40,7 @@ Piano Waterfall 是一个用 PySide6 写的桌面播放器：打开 `.mid` 文�
 
 ### 方式一：下载 Windows 免安装版
 
-1. 打开 [Releases](https://github.com/Dream-Alan/piano-waterfall/releases) 下载
+1. 打开 [Releases](https://github.com/Dream-Alan/Piano_Waterfall_Layout/releases) 下载
    `PianoWaterfall-windows-x64.zip`。
 2. 解压到任意目录，双击 `PianoWaterfall.exe`。
 3. 首次运行若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
@@ -50,8 +50,8 @@ Piano Waterfall 是一个用 PySide6 写的桌面播放器：打开 `.mid` 文�
 需要 Python 3.10 或更高版本。
 
 ```bash
-git clone https://github.com/Dream-Alan/piano-waterfall.git
-cd piano-waterfall
+git clone https://github.com/Dream-Alan/Piano_Waterfall_Layout.git
+cd Piano_Waterfall_Layout
 
 python -m venv .venv
 # Windows
@@ -130,7 +130,7 @@ piano-waterfall --version
 ## 项目结构
 
 ```text
-piano-waterfall/
+Piano_Waterfall_Layout/
 ├─ CHANGELOG.md
 ├─ src/piano_waterfall/
 │  ├─ app.py          主窗口、菜单、播放控制、转录面板
@@ -185,7 +185,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
-  -RepoUrl https://github.com/Dream-Alan/piano-waterfall.git -Tag v1.3.0
+  -RepoUrl https://github.com/Dream-Alan/Piano_Waterfall_Layout.git -Tag v1.3.0
 ```
 
 脚本会初始化仓库、提交、推送 `main` 和 `v1.3.0` 标签；标签会触发
