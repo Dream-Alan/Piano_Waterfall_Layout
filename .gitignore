@@ -1,0 +1,36 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+build/
+dist/
+pip-*/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+pytest-of-*/
+.coverage
+htmlcov/
+
+# PyInstaller output
+release/
+*.spec
+!packaging/*.spec
+
+# Local artefacts
+preview*.png
+*.part
+*.log
+.devdata/
+.piano-waterfall-data/
+.DS_Store
+Thumbs.db
