@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import traceback
 import wave
 from dataclasses import replace
 from pathlib import Path
@@ -50,11 +51,11 @@ from .style import build_stylesheet
 from .synth import DEFAULT_SETTINGS, DEFAULT_VOICE, VOICES, SynthSettings, get_voice, voice_choices
 from .theme import DEFAULT_THEME, THEMES, get_theme
 from .waterfall import WaterfallWidget
-from .workers import RenderWorker, TranscriptionWorker
+from .workers import ModelDownloadWorker, RenderWorker, TranscriptionWorker
 
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 GITHUB_URL = "https://github.com/Dream-Alan/piano-waterfall"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
@@ -97,6 +98,7 @@ class MainWindow(QMainWindow):
         self._render_worker: RenderWorker | None = None
         self._render_target: Path | None = None
         self._transcribe_worker: TranscriptionWorker | None = None
+        self._model_worker: ModelDownloadWorker | None = None
         self._transcribe_messages: set[str] = set()
         self._muted = False
         self._volume_before_mute = 80
@@ -132,7 +134,7 @@ class MainWindow(QMainWindow):
             "空格 播放/暂停 · 双击画面 全屏 · 也可以直接把 MIDI / 音频拖进窗口", 8000
         )
         if not self._transcribe_available:
-            self._log_transcription("提示：当前未安装 AI 转录依赖，音频转 MIDI 不可用。")
+            self._log_transcription("提示：内置转录模型缺失，可在面板中点击「一键下载 AI 模型」。")
             self._log_transcription(transcribe.INSTALL_HINT)
 
     # --------------------------------------------------------------- UI build
@@ -172,6 +174,7 @@ class MainWindow(QMainWindow):
         title.setObjectName("AppTitle")
         tagline = QLabel(APP_TAGLINE, bar)
         tagline.setObjectName("HintLabel")
+        self._tagline_label = tagline
         titles.addWidget(title)
         titles.addWidget(tagline)
         row.addLayout(titles)
@@ -386,28 +389,29 @@ class MainWindow(QMainWindow):
         )
 
         panel = QWidget(self._dock)
+        panel.setMinimumWidth(340)
         column = QVBoxLayout(panel)
         column.setContentsMargins(14, 14, 14, 14)
         column.setSpacing(10)
 
         intro = QLabel(
-            "把任意钢琴音频（MP3 / WAV / FLAC …）识别成 MIDI，再用瀑布流播放。\n"
-            "首次使用会下载 AI 模型（约 200 MB），需要联网。",
+            "内置 hFT-Transformer 模型（22 MB），无需安装 PyTorch。\n"
+            "把 MP3 / WAV / FLAC 识别成 MIDI，再用瀑布流播放。",
             panel,
         )
         intro.setObjectName("HintLabel")
         intro.setWordWrap(True)
         column.addWidget(intro)
 
-        device_row = QHBoxLayout()
-        device_label = QLabel("计算设备", panel)
-        device_label.setObjectName("HintLabel")
-        device_row.addWidget(device_label)
-        self._device_combo = QComboBox(panel)
-        self._device_combo.addItem("自动 (推荐)", "auto")
-        self._device_combo.addItem("CPU", "cpu")
-        device_row.addWidget(self._device_combo, 1)
-        column.addLayout(device_row)
+        status_row = QHBoxLayout()
+        status_label = QLabel("模型状态", panel)
+        status_label.setObjectName("HintLabel")
+        status_row.addWidget(status_label)
+        self._model_status = QLabel(panel)
+        self._model_status.setObjectName("HintLabel")
+        self._model_status.setWordWrap(True)
+        status_row.addWidget(self._model_status, 1)
+        column.addLayout(status_row)
 
         self._transcribe_button = QPushButton(icon("ai", "#071018"), "选择音频并转录", panel)
         self._transcribe_button.setObjectName("AccentButton")
@@ -419,10 +423,11 @@ class MainWindow(QMainWindow):
         self._cancel_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._cancel_button.hide()
         controls.addWidget(self._cancel_button)
-        self._copy_hint_button = QPushButton("复制安装命令", panel)
-        self._copy_hint_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._copy_hint_button.hide()
-        controls.addWidget(self._copy_hint_button)
+        self._install_button = QPushButton("一键下载 AI 模型", panel)
+        self._install_button.setObjectName("SecondaryButton")
+        self._install_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._install_button.hide()
+        controls.addWidget(self._install_button)
         controls.addStretch(1)
         column.addLayout(controls)
 
@@ -442,13 +447,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock)
         self._dock.hide()
 
-        self._transcribe_available, detail = transcribe.availability()
-        self._transcribe_detail = detail
-        if not self._transcribe_available:
-            self._transcribe_button.setEnabled(False)
-            self._transcribe_button.setToolTip("需要安装 AI 转录依赖")
-            self._copy_hint_button.show()
-            self._dock.setWindowTitle("音频转 MIDI（需安装依赖）")
+        self._transcribe_available, self._transcribe_detail = transcribe.availability()
+        self._refresh_model_status()
 
         dock_toggle = self._dock.toggleViewAction()
         dock_toggle.setText("音频转 MIDI 面板")
@@ -461,7 +461,7 @@ class MainWindow(QMainWindow):
         )
         self._transcribe_button.clicked.connect(self._choose_audio)
         self._cancel_button.clicked.connect(self._cancel_transcription)
-        self._copy_hint_button.clicked.connect(self._copy_install_hint)
+        self._install_button.clicked.connect(self._confirm_model_download)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_combo)
         self._voice_combo.currentIndexChanged.connect(self._on_voice_combo)
         self._autoplay_button.toggled.connect(self._on_autoplay_toggled)
@@ -969,35 +969,123 @@ class MainWindow(QMainWindow):
         else:
             self._dock.hide()
 
+    def _refresh_model_status(self) -> None:
+        if self._transcribe_available:
+            self._model_status.setText("已内置 · 22 MB")
+            self._model_status.setToolTip(self._transcribe_detail or "内置 hFT-Transformer 已就绪")
+            self._install_button.hide()
+            self._dock.setWindowTitle("音频转 MIDI")
+            self._transcribe_button.setToolTip("选择音频并转录")
+        else:
+            self._model_status.setText(self._transcribe_detail or "模型缺失")
+            self._model_status.setToolTip(self._transcribe_detail or "")
+            self._install_button.show()
+            self._dock.setWindowTitle("音频转 MIDI（需要下载模型）")
+            self._transcribe_button.setToolTip("请先下载内置转录模型")
+
     def _on_dock_visibility(self, visible: bool) -> None:
         if visible and not self._transcribe_available and not self._transcribe_log.toPlainText():
             self._log_transcription(transcribe.INSTALL_HINT)
+        self._apply_compact_layout()
 
-    def _copy_install_hint(self) -> None:
-        QApplication.clipboard().setText(transcribe.INSTALL_HINT)
-        self.statusBar().showMessage("安装命令已复制到剪贴板", 4000)
+    def _apply_compact_layout(self) -> None:
+        """Trim the top bar when the transcription dock steals horizontal space."""
 
-    def _show_missing_ai(self) -> None:
-        self._toggle_transcribe_dock(force_open=True)
-        detail = self._transcribe_detail or transcribe.INSTALL_HINT
-        box = QMessageBox(self)
-        box.setWindowTitle("AI 转录组件未安装")
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(
-            "音频转 MIDI 需要额外的 AI 依赖（PyTorch、librosa 等），"
-            "它们体积较大，因此没有随程序一起安装。\n\n"
-            "安装后重启程序即可使用：\n\n" + detail
+        compact = self._dock.isVisible() and self.width() < 1500
+        self._tagline_label.setVisible(not compact)
+        self._file_label.setVisible(not compact)
+        if compact:
+            self._transcribe_button_top.setToolTip("把音频转录成 MIDI")
+            self._voice_combo.setMinimumWidth(108)
+        else:
+            self._transcribe_button_top.setToolTip("把音频转录成 MIDI")
+            self._voice_combo.setMinimumWidth(128)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        self._apply_compact_layout()
+
+    def _confirm_model_download(self) -> None:
+        if self._model_worker is not None and self._model_worker.isRunning():
+            return
+        answer = QMessageBox.question(
+            self,
+            "下载 AI 转录模型",
+            "内置转录模型缺失或已损坏，需要重新下载（约 22 MB）。\n\n"
+            "下载完成后即可离线使用，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
         )
-        copy_button = box.addButton("复制安装命令", QMessageBox.ButtonRole.ActionRole)
-        box.addButton("知道了", QMessageBox.ButtonRole.AcceptRole)
-        box.exec()
-        if box.clickedButton() is copy_button:
-            self._copy_install_hint()
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_model_download()
+
+    def _start_model_download(self) -> None:
+        if self._model_worker is not None and self._model_worker.isRunning():
+            return
+        self._toggle_transcribe_dock(force_open=True)
+        self._log_transcription("开始下载内置转录模型（约 22 MB）…")
+        self._transcribe_progress.setRange(0, 100)
+        self._transcribe_progress.setValue(0)
+        self._transcribe_progress.show()
+        self._cancel_button.show()
+        self._cancel_button.setEnabled(True)
+        self._transcribe_button.setEnabled(False)
+        self._install_button.setEnabled(False)
+        self.statusBar().showMessage("正在下载 AI 模型…")
+
+        worker = ModelDownloadWorker(self)
+        self._model_worker = worker
+        worker.progress.connect(self._on_model_progress)
+        worker.succeeded.connect(self._on_model_downloaded)
+        worker.failed.connect(self._on_model_failed)
+        worker.finished.connect(self._cleanup_model_worker)
+        worker.start()
+
+    def _on_model_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            percent = int(done * 100 / total)
+            self._transcribe_progress.setRange(0, 100)
+            self._transcribe_progress.setValue(percent)
+            self.statusBar().showMessage(
+                f"正在下载 AI 模型… {done / 1e6:.1f} / {total / 1e6:.1f} MB"
+            )
+
+    def _finish_model_ui(self) -> None:
+        self._transcribe_progress.hide()
+        self._transcribe_progress.setRange(0, 100)
+        self._transcribe_progress.setValue(0)
+        self._cancel_button.hide()
+        self._cancel_button.setEnabled(True)
+        self._transcribe_button.setEnabled(True)
+        self._install_button.setEnabled(True)
+
+    def _on_model_downloaded(self, path: str) -> None:
+        self._finish_model_ui()
+        self._transcribe_available, self._transcribe_detail = transcribe.availability()
+        self._refresh_model_status()
+        self._log_transcription(f"模型下载完成：{path}")
+        self.statusBar().showMessage("AI 模型已就绪，可以开始转录", 5000)
+        if not self._transcribe_available:
+            QMessageBox.warning(
+                self,
+                "仍不可用",
+                "模型下载完成，但 onnxruntime 不可用，请重新安装 Piano Waterfall。",
+            )
+
+    def _on_model_failed(self, message: str) -> None:
+        self._finish_model_ui()
+        self._log_transcription(f"模型下载失败：{message}")
+        self.statusBar().showMessage("模型下载失败", 5000)
+        QMessageBox.warning(self, "下载失败", message)
+
+    def _cleanup_model_worker(self) -> None:
+        worker = self._model_worker
+        if worker is not None and not worker.isRunning():
+            self._model_worker = None
 
     def _choose_audio(self) -> None:
         if not self._transcribe_available:
-            self._show_missing_ai()
+            self._confirm_model_download()
             return
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1012,7 +1100,7 @@ class MainWindow(QMainWindow):
 
     def start_transcription(self, audio_path: str | Path) -> None:
         if not self._transcribe_available:
-            self._show_missing_ai()
+            self._confirm_model_download()
             return
         if self._transcribe_worker is not None and self._transcribe_worker.isRunning():
             QMessageBox.information(self, "正在转录", "请等当前转录任务完成，或先取消它。")
@@ -1031,12 +1119,10 @@ class MainWindow(QMainWindow):
         self._transcribe_progress.show()
         self._transcribe_button.setEnabled(False)
         self._cancel_button.show()
-        self._copy_hint_button.hide()
         self.statusBar().showMessage(f"正在转录 {audio.name}…")
 
         midi_path = transcriptions_dir() / f"{audio.stem}.mid"
-        device = self._device_combo.currentData() or "auto"
-        worker = TranscriptionWorker(audio, midi_path, str(device), self)
+        worker = TranscriptionWorker(audio, midi_path, self)
         self._transcribe_worker = worker
         worker.progress.connect(self._on_transcribe_progress)
         worker.succeeded.connect(self._on_transcribe_succeeded)
@@ -1089,9 +1175,16 @@ class MainWindow(QMainWindow):
             self._transcribe_worker = None
 
     def _cancel_transcription(self) -> None:
+        cancelled = False
         worker = self._transcribe_worker
         if worker is not None and worker.isRunning():
             worker.cancel()
+            cancelled = True
+        model_worker = self._model_worker
+        if model_worker is not None and model_worker.isRunning():
+            model_worker.cancel()
+            cancelled = True
+        if cancelled:
             self._log_transcription("正在取消…")
             self._cancel_button.setEnabled(False)
             QTimer.singleShot(1500, lambda: self._cancel_button.setEnabled(True))
@@ -1125,9 +1218,9 @@ class MainWindow(QMainWindow):
             "tonejs-instruments</a> 的 VSCO 2 Community Edition 采样（CC-BY 3.0），"
             "本项目做了裁剪、单声道化与响度归一化；瀑布流渲染、播放控制与界面为原创实现"
             "（MIT License）。<br>"
-            "音频转 MIDI 基于 Qiuqiang Kong 的 "
-            "<a href='https://github.com/qiuqiangkong/piano_transcription_inference'>"
-            "piano_transcription_inference</a>（MIT License）。</p>"
+            "音频转 MIDI 使用 Sony 的 "
+            "<a href='https://github.com/sony/hFT-Transformer'>hFT-Transformer</a>"
+            "（MIT License），在应用内以 ONNX Runtime 本地运行，无需 PyTorch。</p>"
             f"<p><a href='{GITHUB_URL}'>{GITHUB_URL}</a></p>"
             "<p style='color:#8fa3b8'>用 PySide6 与 NumPy 构建，可在 Windows / macOS / Linux 运行。</p>"
         )
@@ -1186,7 +1279,57 @@ class MainWindow(QMainWindow):
         if worker is not None and worker.isRunning():
             worker.cancel()
             worker.wait(2000)
+        model_worker = self._model_worker
+        if model_worker is not None and model_worker.isRunning():
+            model_worker.cancel()
+            model_worker.wait(2000)
         super().closeEvent(event)
+
+
+def _transcribe_cli(audio: Path, output: str | None) -> int:
+    """Headless audio-to-MIDI path, also used to smoke-test frozen builds."""
+
+    import faulthandler
+
+    from . import hft
+
+    log_path = transcriptions_dir() / "transcribe-cli.log"
+    log = log_path.open("w", encoding="utf-8", buffering=1)
+    faulthandler.enable(file=log)
+    faulthandler.dump_traceback_later(240, exit=True, file=log)
+
+    def emit(message: str) -> None:
+        print(message, file=log)
+        if sys.stdout is not None:
+            print(message, flush=True)
+
+    try:
+        if not audio.is_file():
+            emit(f"找不到音频文件：{audio}")
+            return 2
+        destination = Path(output) if output else transcriptions_dir() / f"{audio.stem}.mid"
+        emit(f"音频：{audio}")
+        emit(f"模型：{hft.model_path()}")
+        last = -1
+
+        def progress(fraction: float, message: str) -> None:
+            nonlocal last
+            percent = int(fraction * 100)
+            if percent != last:
+                last = percent
+                emit(f"[{percent:3d}%] {message}")
+
+        try:
+            result = hft.transcribe(audio, destination, progress=progress)
+        except Exception as exc:
+            emit(f"转录失败：{exc}")
+            log.write(traceback.format_exc())
+            return 1
+        emit(f"转录完成：{result}")
+        return 0
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+        log.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1206,12 +1349,25 @@ def main(argv: list[str] | None = None) -> int:
         choices=list(VOICES),
         help="piano voice (default: %(default)s)",
     )
+    parser.add_argument(
+        "--transcribe",
+        metavar="AUDIO",
+        help="transcribe an audio file to MIDI without opening the window",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="MIDI",
+        help="output path for --transcribe (default: app data directory)",
+    )
     parser.add_argument("files", nargs="*", help="MIDI or audio file to open")
     args, _unknown = parser.parse_known_args(arguments[1:])
 
     if args.version:
         print(f"Piano Waterfall {APP_VERSION}")
         return 0
+
+    if args.transcribe:
+        return _transcribe_cli(Path(args.transcribe), args.out)
 
     app = QApplication([arguments[0]])
     app.setApplicationName(APP_NAME)

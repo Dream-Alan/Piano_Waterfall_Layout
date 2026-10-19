@@ -17,7 +17,7 @@
 Piano Waterfall 是一个用 PySide6 写的桌面播放器：打开 `.mid` 文件，它会用内置的真实钢琴采样渲染音频，
 同时绘制 Synthesia 风格的瀑布流。不需要 SoundFont、不需要联网、首次渲染后自动缓存，之后打开同一首曲子几乎是瞬时的。
 
-如果只有 MP3 / WAV 录音，也可以装上可选的 AI 依赖，先转成 MIDI 再播放。
+如果只有 MP3 / WAV 录音，也可以直接用内置的 hFT-Transformer 转录成 MIDI，再播放。
 
 ---
 
@@ -32,8 +32,8 @@ Piano Waterfall 是一个用 PySide6 写的桌面播放器：打开 `.mid` 文�
 - **自动播放开关**：顶栏「自动播放」可随时打开或关闭，打开 MIDI / 音频后是否立即播放由它决定，设置会记住。
 - **全屏模式**：F11 或双击画面，适合投屏和练琴。
 - **拖放打开**：把 MIDI 或音频直接拖进窗口。
-- **音频转 MIDI**（可选）：基于 [piano_transcription_inference](https://github.com/qiuqiangkong/piano_transcription_inference)，
-  CPU 也能跑，首次使用会下载约 200 MB 模型。
+- **内置音频转 MIDI**：随程序附带 [hFT-Transformer](https://github.com/sony/hFT-Transformer)
+  的 22 MB ONNX 模型，CPU 本地推理，不需要安装 PyTorch，也不上传音频；模型缺失时可在面板里一键重新下载。
 - **跨平台**：Windows、macOS、Linux，同一套代码。
 
 ## 快速开始
@@ -69,17 +69,14 @@ piano-waterfall
 python -m piano_waterfall path/to/song.mid
 piano-waterfall path/to/song.mid --fullscreen
 piano-waterfall path/to/song.mid --voice felt
+piano-waterfall --transcribe recording.mp3 --out song.mid
 piano-waterfall --version
 ```
 
-### 音频转 MIDI（可选）
+### 音频转 MIDI
 
-```bash
-pip install "piano-waterfall[ai]"
-```
-
-安装后在主界面点「音频转 MIDI」，选择 MP3 / WAV / FLAC 等文件即可。首次转录会下载模型，
-之后的 MIDI 会保存在应用数据目录里，可以直接打开。
+无需额外安装。打开主界面的「音频转 MIDI」面板，选择 MP3 / WAV / FLAC 等文件即可；
+模型随程序一起分发，转录在本机 CPU 上完成。转录结果保存在应用数据目录里，完成后会自动打开。
 
 ## 使用说明
 
@@ -99,7 +96,7 @@ pip install "piano-waterfall[ai]"
   `room` 近场录音；换音色会沿用当前进度，重新渲染一次并单独缓存。
 - 顶栏「自动播放」开关控制打开文件后是否立即开始；关闭时只加载画面，按空格再播放。
 - 命令行可用 `--voice grand|bright|felt|upright|room` 指定初始音色。
-- 转录面板里可以切「自动 / CPU」计算设备；有 NVIDIA 显卡时自动优先使用 CUDA。
+- 转录面板显示内置模型状态；如果模型文件损坏或缺失，点「一键下载 AI 模型」即可修复，不需要装依赖。
 - 数据（音频缓存、转录出的 MIDI、设置）默认保存在：
   - Windows：`%LOCALAPPDATA%\PianoWaterfall`
   - macOS：`~/Library/Application Support/PianoWaterfall`
@@ -143,12 +140,14 @@ piano-waterfall/
 │  ├─ midi_io.py      MIDI 解析、延音踏板、音符工具
 │  ├─ layout.py       键盘几何布局
 │  ├─ player.py       播放时钟与 QMediaPlayer 封装
-│  ├─ transcribe.py   可选的 AI 音频转 MIDI
+│  ├─ hft.py          hFT-Transformer ONNX 推理、mel 前端、音符解码
+│  ├─ transcribe.py   音频转 MIDI 的统一入口（兼容旧 API）
 │  ├─ theme.py        5 套主题配色
 │  ├─ style.py        Qt 深色样式表
 │  ├─ icons.py        矢量图标
 │  └─ paths.py        应用数据目录与缓存
 ├─ src/piano_waterfall/assets/samples/  钢琴采样与授权说明
+├─ src/piano_waterfall/assets/models/   hFT-Transformer ONNX 模型与授权说明
 ├─ tests/             pytest 单元测试（离屏 Qt）
 ├─ scripts/           截图、图标、Windows 打包、GitHub 推送脚本
 ├─ packaging/         PyInstaller spec 与启动器
@@ -160,7 +159,7 @@ piano-waterfall/
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest          # 39 个测试，Qt 使用 offscreen 平台
+python -m pytest          # 46 个测试，Qt 使用 offscreen 平台
 python -m ruff check .
 ```
 
@@ -186,10 +185,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
-  -RepoUrl https://github.com/Dream-Alan/piano-waterfall.git -Tag v1.2.0
+  -RepoUrl https://github.com/Dream-Alan/piano-waterfall.git -Tag v1.3.0
 ```
 
-脚本会初始化仓库、提交、推送 `main` 和 `v1.2.0` 标签；标签会触发
+脚本会初始化仓库、提交、推送 `main` 和 `v1.3.0` 标签；标签会触发
 `.github/workflows/release.yml` 自动构建 Windows zip 并创建 Release。
 如果仓库名或用户名不同，把上面的地址和项目里的 `Dream-Alan` 一起替换掉即可。
 
@@ -211,9 +210,10 @@ powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
 **Windows 提示「已保护你的电脑」？**
 这是未签名程序的 SmartScreen 提示，选择「更多信息 → 仍要运行」即可。
 
-**音频转 MIDI 一直失败？**
-确认安装了 `pip install "piano-waterfall[ai]"`，首次运行需要联网下载模型；国内网络可以设置
-`HF_ENDPOINT=https://hf-mirror.com` 后重试。
+**音频转 MIDI 失败？**
+面板顶部会显示模型状态；如果模型缺失或损坏，点「一键下载 AI 模型」重新获取（约 22 MB）。
+MP3 解码依赖 libsndfile，若遇到不支持的编码，可先转成 WAV 再试。转录较长的录音时请留出
+大约音频时长 1–2 倍的时间，CPU 型号越新越快。
 
 **Linux 启动报 Qt 平台插件错误？**
 安装 `libegl1`、`libxkbcommon-x11-0`、`libxcb-cursor0` 等依赖，或在无显示器环境使用
@@ -221,13 +221,15 @@ powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
 
 ## 致谢
 
-- [piano_transcription_inference](https://github.com/qiuqiangkong/piano_transcription_inference)
-  （Qiuqiang Kong，MIT）提供音频转 MIDI 模型与推理代码。
+- [hFT-Transformer](https://github.com/sony/hFT-Transformer)（Sony，MIT）提供高精度钢琴转录
+  模型；本项目把官方 checkpoint 导出为 ONNX，并用 ONNX Runtime 在本地运行。
 - [tonejs-instruments](https://github.com/nbrosowsky/tonejs-instruments) 提供钢琴采样，
   原始录音来自 **VSCO 2 Community Edition**（Versilian Studios），采样以 **CC-BY 3.0** 授权；
   本项目做了裁剪、单声道化、重采样与响度归一化，详见
   [`assets/samples/ATTRIBUTION.md`](src/piano_waterfall/assets/samples/ATTRIBUTION.md)。
-- [mido](https://mido.readthedocs.io/) 负责 MIDI 读写，[numpy](https://numpy.org/) 负责采样重采样与混音。
+- [mido](https://mido.readthedocs.io/) 负责 MIDI 读写，[numpy](https://numpy.org/) 负责采样重采样与混音，
+  [ONNX Runtime](https://onnxruntime.ai/) 负责本地推理，[libsndfile](https://libsndfile.github.io/libsndfile/)
+  经 [soundfile](https://python-soundfile.readthedocs.io/) 解码音频。
 - [Qt for Python](https://doc.qt.io/qtforpython/) 提供窗口、多媒体与绘制能力。
 - 视觉灵感来自 Synthesia 的瀑布流。
 
@@ -244,8 +246,10 @@ Synthesia-style waterfall. It parses MIDI with `mido`, renders a piano track off
 grand-piano samples (A1–C8) with per-note band-limited resampling, applies one of five tone presets
 (EQ, filtering, reverb and delay), caches the rendered WAV per voice, and draws the animation with
 PySide6 / QPainter. An auto-play toggle decides whether a freshly opened file starts immediately.
-Optional AI transcription (`pip install "piano-waterfall[ai]"`) converts MP3/WAV recordings to MIDI
-first. Five themes, fullscreen mode, drag & drop, speed control and keyboard shortcuts are included.
+Optional AI transcription is built in: a 22 MB hFT-Transformer ONNX model runs locally on the CPU
+through ONNX Runtime, so MP3/WAV recordings can be converted to MIDI without installing PyTorch or
+uploading audio. Five themes, fullscreen mode, drag & drop, speed control and keyboard shortcuts are
+included.
 Build a standalone Windows executable with `scripts/build_windows.ps1`; tagged pushes trigger a
 GitHub release workflow. The application is MIT-licensed; the piano samples are CC-BY 3.0 (VSCO 2
 CE via tonejs-instruments).

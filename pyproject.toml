@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "piano-waterfall"
-version = "1.2.0"
+version = "1.3.0"
 description = "Turn MIDI files or piano recordings into a neon waterfall player."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,14 +28,11 @@ classifiers = [
 dependencies = [
     "PySide6>=6.6",
     "numpy>=1.24",
+    "soundfile>=0.12",
+    "onnxruntime>=1.17",
 ]
 
 [project.optional-dependencies]
-ai = [
-    "torch>=1.13",
-    "librosa>=0.10",
-    "piano-transcription-inference>=0.0.5",
-]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
@@ -61,6 +58,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 piano_waterfall = [
     "assets/*",
+    "assets/models/*",
     "assets/samples/ATTRIBUTION.md",
     "assets/samples/piano/*.wav",
 ]

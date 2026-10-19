@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller recipe for a self-contained Windows build (onedir)."""
 
+import sys
 from pathlib import Path
 
 import PySide6
@@ -15,23 +16,35 @@ ffmpeg_binaries = [
     (str(dll), "PySide6") for dll in qt_dir.glob("*.dll") if dll.name[:2] in {"av", "sw"}
 ]
 
+# conda's `_ctypes.pyd` links against `ffi.dll` from Library/bin, which the
+# dependency scanner does not see because it is outside the normal DLL path.
+ffi_dll = Path(sys.base_prefix) / "Library" / "bin" / "ffi.dll"
+ffi_binaries = [(str(ffi_dll), ".")] if ffi_dll.exists() else []
+
 datas = [
     (str(ROOT / "assets" / "icon.png"), "assets"),
     (str(ROOT / "assets" / "icon.ico"), "assets"),
     (str(ROOT / "src" / "piano_waterfall" / "assets" / "samples" / "piano"), "assets/samples/piano"),
     (str(ROOT / "src" / "piano_waterfall" / "assets" / "samples" / "ATTRIBUTION.md"), "assets/samples"),
+    (
+        str(ROOT / "src" / "piano_waterfall" / "assets" / "models" / "hft_transformer.onnx"),
+        "assets/models",
+    ),
+    (
+        str(ROOT / "src" / "piano_waterfall" / "assets" / "models" / "ATTRIBUTION.md"),
+        "assets/models",
+    ),
 ]
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    binaries=ffmpeg_binaries,
+    binaries=ffmpeg_binaries + ffi_binaries,
     datas=datas,
-    hiddenimports=["PySide6.QtMultimedia"],
+    hiddenimports=["PySide6.QtMultimedia", "ctypes", "_ctypes", "soundfile", "onnxruntime"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # The AI extras are optional and huge; keep the release build lean.
     excludes=["tkinter", "torch", "librosa", "piano_transcription_inference", "matplotlib"],
     noarchive=False,
 )

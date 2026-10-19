@@ -48,6 +48,7 @@ def main() -> int:
     window._set_theme(args.theme)  # noqa: SLF001 - dev helper
     window._dock.setVisible(args.dock)  # noqa: SLF001 - ignore saved layout
     window.set_voice(args.voice, reload=False)
+    window._autoplay_button.setChecked(True)  # noqa: SLF001 - docs screenshot
     window.load_midi(args.midi, autoplay=False)
 
     deadline = time.monotonic() + 120
