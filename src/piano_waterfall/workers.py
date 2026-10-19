@@ -6,6 +6,7 @@ and both can be cancelled cooperatively.
 
 from __future__ import annotations
 
+import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -81,12 +82,14 @@ class RenderWorker(QThread):
                 should_cancel=lambda: self._cancelled,
             )
         except Exception as exc:  # pragma: no cover - UI path
+            traceback.print_exc()
             self.failed.emit(str(exc))
             return
         temp_path = self.wav_path.with_name(self.wav_path.name + ".part")
         try:
             write_wav(temp_path, audio, self.settings.sample_rate)
         except Exception as exc:  # pragma: no cover
+            traceback.print_exc()
             temp_path.unlink(missing_ok=True)
             self.failed.emit(f"写入音频失败：{exc}")
             return

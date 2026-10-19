@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--time", type=float, default=40.0)
     parser.add_argument("--size", default="1280x800")
     parser.add_argument("--theme", default="neon")
+    parser.add_argument("--voice", default="grand")
     parser.add_argument("--dock", action="store_true", help="show the transcription dock")
     args = parser.parse_args()
 
@@ -45,11 +46,16 @@ def main() -> int:
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     window.show()
     window._set_theme(args.theme)  # noqa: SLF001 - dev helper
+    window._dock.setVisible(args.dock)  # noqa: SLF001 - ignore saved layout
+    window.set_voice(args.voice, reload=False)
     window.load_midi(args.midi, autoplay=False)
 
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline and not window._clock.loaded:  # noqa: SLF001
-        QTest.qWait(80)
+        # QTest.qWait() holds the GIL and starves the render QThread; sleeping
+        # releases it so the worker can make progress while we pump events.
+        app.processEvents()
+        time.sleep(0.02)
 
     if args.dock:
         window._dock.show()  # noqa: SLF001

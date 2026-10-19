@@ -29,9 +29,11 @@ def test_cached_audio_path_is_stable_and_settings_aware(monkeypatch, tmp_path) -
     first = cached_audio_path(midi, SynthSettings())
     again = cached_audio_path(midi, SynthSettings())
     other = cached_audio_path(midi, SynthSettings(max_harmonics=6))
+    other_voice = cached_audio_path(midi, SynthSettings(voice="felt"))
 
     assert first == again
     assert first != other
+    assert first != other_voice
     assert first.parent == tmp_path / "data" / "audio-cache"
     assert first.name.startswith("song-")
     assert first.suffix == ".wav"

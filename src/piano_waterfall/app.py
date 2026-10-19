@@ -5,8 +5,11 @@ Run with ``python -m piano_waterfall`` or the ``piano-waterfall`` command.
 
 from __future__ import annotations
 
+import argparse
+import os
 import sys
 import wave
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, QUrl
@@ -44,14 +47,14 @@ from .midi_io import MidiError, format_time, parse_midi
 from .paths import app_data_dir, audio_cache_dir, cached_audio_path, transcriptions_dir
 from .player import PlaybackClock
 from .style import build_stylesheet
-from .synth import DEFAULT_SETTINGS
+from .synth import DEFAULT_SETTINGS, DEFAULT_VOICE, VOICES, SynthSettings, get_voice, voice_choices
 from .theme import DEFAULT_THEME, THEMES, get_theme
 from .waterfall import WaterfallWidget
 from .workers import RenderWorker, TranscriptionWorker
 
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 GITHUB_URL = "https://github.com/Dream-Alan/piano-waterfall"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
@@ -98,6 +101,8 @@ class MainWindow(QMainWindow):
         self._muted = False
         self._volume_before_mute = 80
         self._theme_name = DEFAULT_THEME
+        self._voice_key = DEFAULT_VOICE
+        self._resume_at = 0.0
         self._theme_actions: dict[str, QAction] = {}
         self._closing = False
 
@@ -185,6 +190,19 @@ class MainWindow(QMainWindow):
         self._transcribe_button_top.setObjectName("SecondaryButton")
         self._transcribe_button_top.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         row.addWidget(self._transcribe_button_top)
+
+        self._voice_combo = QComboBox(bar)
+        self._voice_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._voice_combo.setMinimumWidth(128)
+        for voice in voice_choices():
+            self._voice_combo.addItem(voice.name, voice.key)
+            self._voice_combo.setItemData(
+                self._voice_combo.count() - 1,
+                f"{voice.description}\n切换后会重新合成并缓存该音色",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self._voice_combo.setToolTip("选择钢琴音色")
+        row.addWidget(self._voice_combo)
 
         self._theme_combo = QComboBox(bar)
         self._theme_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -436,6 +454,7 @@ class MainWindow(QMainWindow):
         self._cancel_button.clicked.connect(self._cancel_transcription)
         self._copy_hint_button.clicked.connect(self._copy_install_hint)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_combo)
+        self._voice_combo.currentIndexChanged.connect(self._on_voice_combo)
         self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
         self._play_button.clicked.connect(self._toggle_play)
         self._restart_button.clicked.connect(self._restart)
@@ -464,6 +483,7 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- settings
     def _restore_settings(self) -> None:
+        self.set_voice(str(self._settings.value("voice", DEFAULT_VOICE)), reload=False)
         self._set_theme(str(self._settings.value("theme", DEFAULT_THEME)))
 
         self._speed_slider.blockSignals(True)
@@ -510,6 +530,7 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self) -> None:
         self._settings.setValue("theme", self._theme_name)
+        self._settings.setValue("voice", self._voice_key)
         self._settings.setValue("fall_speed", self._speed_slider.value())
         self._settings.setValue("volume", self._volume_slider.value())
         self._settings.setValue("rate", self._rate_combo.currentData())
@@ -519,6 +540,37 @@ class MainWindow(QMainWindow):
         self._settings.setValue("last_dir", self._last_dir)
 
     # --------------------------------------------------------------- theming
+    def _on_voice_combo(self, index: int) -> None:
+        key = self._voice_combo.itemData(index)
+        if key:
+            self.set_voice(str(key))
+
+    def set_voice(self, name: str, *, reload: bool = True) -> None:
+        """Select a piano voice; re-render the current song when needed."""
+
+        if name not in VOICES:
+            name = DEFAULT_VOICE
+        changed = name != self._voice_key
+        self._voice_key = name
+        self._settings.setValue("voice", name)
+
+        self._voice_combo.blockSignals(True)
+        index = self._voice_combo.findData(name)
+        if index >= 0:
+            self._voice_combo.setCurrentIndex(index)
+        self._voice_combo.blockSignals(False)
+
+        if reload and changed and self._song is not None and self._midi_path is not None:
+            self._resume_at = self._clock.time
+            self._pending_play = self._clock.playing
+            self._clock.pause()
+            self._cancel_render()
+            self.statusBar().showMessage(f"正在切换音色：{get_voice(name).name}…")
+            self._prepare_audio(self._midi_path, self._song)
+
+    def _synth_settings(self) -> SynthSettings:
+        return replace(DEFAULT_SETTINGS, voice=self._voice_key)
+
     def _on_theme_combo(self, index: int) -> None:
         key = self._theme_combo.itemData(index)
         if key:
@@ -715,6 +767,7 @@ class MainWindow(QMainWindow):
         self._duration = song.duration
         self._last_painted = -1.0
         self._pending_play = bool(autoplay)
+        self._resume_at = 0.0
 
         self.widget.set_song(song, title=target.stem)
         self.widget.set_theme(self._theme_name)
@@ -739,20 +792,21 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------- piano audio
     def _prepare_audio(self, midi_path: Path, song) -> None:
-        cached = cached_audio_path(midi_path, DEFAULT_SETTINGS)
+        settings = self._synth_settings()
+        cached = cached_audio_path(midi_path, settings)
         if cached.exists() and cached.stat().st_size > 4096:
             self._load_audio(cached, song)
             return
-        self._start_render(midi_path, song, cached)
+        self._start_render(midi_path, song, cached, settings)
 
-    def _start_render(self, midi_path: Path, song, cached: Path) -> None:
+    def _start_render(self, midi_path: Path, song, cached: Path, settings) -> None:
         self._render_target = cached
         self.widget.show_overlay(
             "正在合成钢琴音频",
-            "首次打开这首曲子需要渲染音色，完成后会缓存，下次秒开。",
+            "首次打开这首曲子（或切换音色）需要渲染，完成后会缓存，下次秒开。",
             None,
         )
-        worker = RenderWorker(song, midi_path, cached)
+        worker = RenderWorker(song, midi_path, cached, settings)
         self._render_worker = worker
         worker.progress.connect(self._on_render_progress)
         worker.succeeded.connect(self._on_render_succeeded)
@@ -803,12 +857,16 @@ class MainWindow(QMainWindow):
         self._render_worker = None
 
     def _load_audio(self, wav_path: Path, song) -> None:
+        resume = self._resume_at
+        self._resume_at = 0.0
         self._clock.load(wav_path, song.duration)
         self._clock.set_rate(float(self._rate_combo.currentData()))
         self._clock.set_volume(self._volume_slider.value() / 100)
         self._duration = max(song.duration, self._clock.duration)
         self._duration_label.setText(format_time(self._duration))
         self._seek.setRange(0, int(self._duration * 1000))
+        if resume > 0.05:
+            self._clock.seek(min(resume, self._duration))
         if self._pending_play:
             self._pending_play = False
             self._clock.play()
@@ -1095,10 +1153,25 @@ class MainWindow(QMainWindow):
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(argv if argv is not None else sys.argv)
-    options = [arg for arg in arguments[1:] if arg.startswith("-")]
-    files = [arg for arg in arguments[1:] if not arg.startswith("-")]
+    parser = argparse.ArgumentParser(
+        prog="piano-waterfall",
+        description="Piano Waterfall – MIDI waterfall player with offline piano synthesis.",
+    )
+    parser.add_argument("--version", "-V", action="store_true", help="print version and exit")
+    parser.add_argument("--fullscreen", action="store_true", help="start in fullscreen")
+    parser.add_argument(
+        "--smoke-test", action="store_true", help="open the window, then quit (used by CI)"
+    )
+    parser.add_argument(
+        "--voice",
+        default=DEFAULT_VOICE,
+        choices=list(VOICES),
+        help="piano voice (default: %(default)s)",
+    )
+    parser.add_argument("files", nargs="*", help="MIDI or audio file to open")
+    args, _unknown = parser.parse_known_args(arguments[1:])
 
-    if "--version" in options or "-V" in options:
+    if args.version:
         print(f"Piano Waterfall {APP_VERSION}")
         return 0
 
@@ -1111,16 +1184,19 @@ def main(argv: list[str] | None = None) -> int:
     app.setWindowIcon(load_window_icon())
 
     window = MainWindow()
-    if "--fullscreen" in options:
+    window.set_voice(args.voice, reload=False)
+    if args.fullscreen:
         window.showFullScreen()
     else:
         window.show()
 
-    if files:
-        QTimer.singleShot(120, lambda: window.open_path(files[0]))
-    if "--smoke-test" in options:
+    if args.files:
+        QTimer.singleShot(120, lambda: window.open_path(args.files[0]))
+    if args.smoke_test:
         # Used by packaging CI: start, load nothing, then exit without a user.
-        QTimer.singleShot(1500, app.quit)
+        # PIANO_WATERFALL_SMOKE_MS can extend the run to exercise audio rendering.
+        smoke_ms = int(os.environ.get("PIANO_WATERFALL_SMOKE_MS", "1500"))
+        QTimer.singleShot(smoke_ms, app.quit)
 
     return app.exec()
 

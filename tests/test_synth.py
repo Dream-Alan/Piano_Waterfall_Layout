@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
 from piano_waterfall.midi_io import Note, Song
 from piano_waterfall.synth import (
     DEFAULT_SETTINGS,
+    DEFAULT_VOICE,
+    VOICES,
     RenderCancelled,
     SynthSettings,
+    get_voice,
     render_song,
     write_wav,
 )
@@ -56,18 +61,58 @@ def test_default_settings_are_sane() -> None:
     assert DEFAULT_SETTINGS.sample_rate == 44_100
     assert DEFAULT_SETTINGS.channels == 2
     assert 0 < DEFAULT_SETTINGS.normalize <= 1
+    assert DEFAULT_SETTINGS.voice == DEFAULT_VOICE
+
+
+def _centroid(audio: np.ndarray, sample_rate: int) -> float:
+    mono = audio.mean(axis=1)
+    spectrum = np.abs(np.fft.rfft(mono))
+    freqs = np.fft.rfftfreq(len(mono), 1.0 / sample_rate)
+    return float((spectrum * freqs).sum() / max(spectrum.sum(), 1e-9))
+
+
+def test_voice_presets_are_well_defined() -> None:
+    assert DEFAULT_VOICE in VOICES
+    assert len(VOICES) >= 5
+    for key, voice in VOICES.items():
+        assert voice.key == key
+        assert voice.name and voice.description
+        assert 4 <= voice.partials <= 32
+        assert 0.001 <= voice.attack <= 0.05
+        assert voice.decay > 0 and voice.gain > 0
+
+
+def test_unknown_voice_falls_back_to_default() -> None:
+    assert get_voice("does-not-exist").key == DEFAULT_VOICE
+    assert get_voice(None).key == DEFAULT_VOICE
+
+
+def test_voice_changes_the_rendered_timbre() -> None:
+    bright = render_song(_song(), replace(TINY, voice="bright"))
+    felt = render_song(_song(), replace(TINY, voice="felt"))
+    assert bright.shape == felt.shape
+    assert not np.allclose(bright, felt, atol=1e-4)
+    assert _centroid(bright, TINY.sample_rate) > _centroid(felt, TINY.sample_rate) * 1.3
+
+
+def test_every_voice_renders() -> None:
+    for key in VOICES:
+        audio = render_song(_song(), replace(TINY, voice=key))
+        assert np.isfinite(audio).all()
+        assert float(np.max(np.abs(audio))) > 0.001
 
 
 def test_write_wav_accepts_part_suffix(tmp_path) -> None:
     """The renderer writes to ``*.wav.part`` before renaming (regression)."""
 
-    import soundfile as sf
+    import wave
 
     audio = render_song(_song(), TINY)
     target = tmp_path / "audio.wav.part"
     write_wav(target, audio, TINY.sample_rate)
     assert target.exists() and target.stat().st_size > 1000
-    info = sf.info(str(target))
-    assert info.samplerate == TINY.sample_rate
-    assert info.channels == 2
-    assert info.format == "WAV"
+    with wave.open(str(target), "rb") as handle:
+        assert handle.getframerate() == TINY.sample_rate
+        assert handle.getnchannels() == 2
+        assert handle.getsampwidth() == 2
+        assert handle.getnframes() == audio.shape[0]

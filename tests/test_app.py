@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from piano_waterfall.app import APP_NAME, APP_VERSION, MainWindow
+from piano_waterfall.synth import VOICES
 
 
 def test_main_window_builds(qapp, monkeypatch, tmp_path) -> None:
@@ -10,8 +11,12 @@ def test_main_window_builds(qapp, monkeypatch, tmp_path) -> None:
         assert APP_NAME in window.windowTitle() or "Piano Waterfall" in window.windowTitle()
         assert window.widget is not None
         assert window.widget.height() > 0
-        assert not window._clock.loaded
+        assert window._clock.loaded is False
         assert APP_VERSION.count(".") >= 1
+        assert window._voice_combo.count() == len(VOICES)
+        window.set_voice("felt", reload=False)
+        assert window._voice_key == "felt"
+        assert window._synth_settings().voice == "felt"
         window.show()
         qapp.processEvents()
         assert window.isVisible()

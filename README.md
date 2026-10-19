@@ -23,7 +23,9 @@ Synthesia 风格的瀑布流。不需要 SoundFont、不需要联网、首次合
 
 ## 功能
 
-- **MIDI 即开即播**：内置钢琴音色合成（加法合成 + 琴槌噪声 + 早期反射），完全离线。
+- **MIDI 即开即播**：内置 5 种钢琴音色（音乐会三角、明亮流行、毛毡柔音、复古立式、梦幻电钢），
+  加法合成 + 非谐性泛音 + 琴槌噪声 + 早期反射，完全离线。
+- **一键换音色**：顶部音色下拉框即时切换，按音色分别缓存，切换后自动回到原播放位置。
 - **瀑布流动画**：霓虹音符、按键高亮、粒子、判定线，支持 5 套主题与彩虹音符。
 - **播放控制**：播放 / 暂停、重播、拖动进度、0.5–1.5× 倍速、音量与静音。
 - **全屏模式**：F11 或双击画面，适合投屏和练琴。
@@ -64,6 +66,7 @@ piano-waterfall
 ```bash
 python -m piano_waterfall path/to/song.mid
 piano-waterfall path/to/song.mid --fullscreen
+piano-waterfall path/to/song.mid --voice felt
 piano-waterfall --version
 ```
 
@@ -90,6 +93,9 @@ pip install "piano-waterfall[ai]"
 | 查看快捷键 | `F1` |
 
 - 下拉框切换主题，右侧滑杆调整音符下落速度，倍速框调整播放速度。
+- 顶部音色框可切换 `grand` 音乐会三角、`bright` 明亮流行、`felt` 毛毡柔音、`upright` 复古立式、
+  `electric` 梦幻电钢；换音色会沿用当前进度，重新合成一次并单独缓存。
+- 命令行可用 `--voice grand|bright|felt|upright|electric` 指定初始音色。
 - 转录面板里可以切「自动 / CPU」计算设备；有 NVIDIA 显卡时自动优先使用 CUDA。
 - 数据（音频缓存、转录出的 MIDI、设置）默认保存在：
   - Windows：`%LOCALAPPDATA%\PianoWaterfall`
@@ -114,7 +120,7 @@ pip install "piano-waterfall[ai]"
 | --- | --- |
 | 解析 MIDI | `mido` 按绝对 tick 累加，处理延音踏板（CC64）、未闭合音符与打击乐通道 |
 | 键盘布局 | 根据音域自动补全到 C 边界，白键等宽、黑键居中偏窄，绘制范围限制在 A0–C8 |
-| 音频合成 | numpy 加法合成 12 个谐波 + 琴槌噪声 + 6 个早期反射，渲染为 44.1 kHz 立体声 WAV |
+| 音频合成 | numpy 加法合成：5 种音色预设，各自配置泛音数、非谐性、锤击噪声与衰减；44.1 kHz 立体声 WAV |
 | 播放 | `QMediaPlayer` 播放 WAV；`PlaybackClock` 用 50 ms 位置回报 + 单调时钟插值，暂停/拖动/倍速都保持同步 |
 | 画面 | `QPainter` 每帧绘制背景光晕、音符渐变、粒子、判定线与按键 |
 
@@ -125,6 +131,7 @@ pip install "piano-waterfall[ai]"
 
 ```text
 piano-waterfall/
+├─ CHANGELOG.md
 ├─ src/piano_waterfall/
 │  ├─ app.py          主窗口、菜单、播放控制、转录面板
 │  ├─ waterfall.py    瀑布流绘制（QPainter）
@@ -148,7 +155,7 @@ piano-waterfall/
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest          # 32 个测试，Qt 使用 offscreen 平台
+python -m pytest          # 36 个测试，Qt 使用 offscreen 平台
 python -m ruff check .
 ```
 
@@ -174,10 +181,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
-  -RepoUrl https://github.com/Dream-Alan/piano-waterfall.git -Tag v1.0.0
+  -RepoUrl https://github.com/Dream-Alan/piano-waterfall.git -Tag v1.1.0
 ```
 
-脚本会初始化仓库、提交、推送 `main` 和 `v1.0.0` 标签；标签会触发
+脚本会初始化仓库、提交、推送 `main` 和 `v1.1.0` 标签；标签会触发
 `.github/workflows/release.yml` 自动构建 Windows zip 并创建 Release。
 如果仓库名或用户名不同，把上面的地址和项目里的 `Dream-Alan` 一起替换掉即可。
 
@@ -190,6 +197,10 @@ powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
 **没有声音？**
 先检查系统音量和播放器右下角的音量滑杆。如果状态栏提示合成失败，通常是磁盘空间不足或缓存目录不可写；
 可以设置 `PIANO_WATERFALL_DATA_DIR` 换一个可写目录。
+
+**觉得音色太亮 / 太闷？**
+顶部音色框换一个预设试试：毛毡柔音更安静温暖，明亮流行更清脆，复古立式带一点走音感，
+梦幻电钢偏柔和的电钢琴。换音色后需要重新合成一次，进度条会显示在画面上。
 
 **Windows 提示「已保护你的电脑」？**
 这是未签名程序的 SmartScreen 提示，选择「更多信息 → 仍要运行」即可。
@@ -219,8 +230,9 @@ powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
 ## English summary
 
 Piano Waterfall is a desktop player that turns MIDI files (or piano recordings) into a neon
-Synthesia-style waterfall. It parses MIDI with `mido`, synthesises a piano track offline with numpy,
-caches the rendered WAV, and draws the animation with PySide6 / QPainter. Optional AI transcription
+Synthesia-style waterfall. It parses MIDI with `mido`, synthesises a piano track offline with numpy
+(five selectable voices with their own harmonics, inharmonicity and hammer noise), caches the rendered
+WAV per voice, and draws the animation with PySide6 / QPainter. Optional AI transcription
 (`pip install "piano-waterfall[ai]"`) converts MP3/WAV recordings to MIDI first. Five themes,
 fullscreen mode, drag & drop, speed control and keyboard shortcuts are included. Build a standalone
 Windows executable with `scripts/build_windows.ps1`; tagged pushes trigger a GitHub release workflow.

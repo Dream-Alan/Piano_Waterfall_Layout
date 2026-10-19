@@ -12,7 +12,7 @@ from pathlib import Path
 from .synth import SynthSettings
 
 APP_NAME = "PianoWaterfall"
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 DATA_DIR_ENV = "PIANO_WATERFALL_DATA_DIR"
 
 
@@ -81,6 +81,7 @@ def _fingerprint(path: Path, settings: SynthSettings) -> str:
         "brightness": settings.brightness,
         "reverb": settings.reverb,
         "tail": settings.tail,
+        "voice": settings.voice,
     }
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:20]
 
