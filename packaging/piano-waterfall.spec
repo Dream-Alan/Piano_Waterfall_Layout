@@ -21,6 +21,13 @@ ffmpeg_binaries = [
 ffi_dll = Path(sys.base_prefix) / "Library" / "bin" / "ffi.dll"
 ffi_binaries = [(str(ffi_dll), ".")] if ffi_dll.exists() else []
 
+# Conda's `_ssl.pyd` links to OpenSSL DLLs outside the standard search path, so
+# HTTPS downloads (the optional transcription models) fail without these.
+ssl_binaries = []
+for folder in (Path(sys.base_prefix) / "Library" / "bin", Path(sys.base_prefix) / "DLLs"):
+    for pattern in ("libssl-3*.dll", "libcrypto-3*.dll"):
+        ssl_binaries.extend((str(dll), ".") for dll in folder.glob(pattern))
+
 datas = [
     (str(ROOT / "assets" / "icon.png"), "assets"),
     (str(ROOT / "assets" / "icon.ico"), "assets"),
@@ -39,9 +46,17 @@ datas = [
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    binaries=ffmpeg_binaries + ffi_binaries,
+    binaries=ffmpeg_binaries + ffi_binaries + ssl_binaries,
     datas=datas,
-    hiddenimports=["PySide6.QtMultimedia", "ctypes", "_ctypes", "soundfile", "onnxruntime"],
+    hiddenimports=[
+        "PySide6.QtMultimedia",
+        "ctypes",
+        "_ctypes",
+        "soundfile",
+        "onnxruntime",
+        "ssl",
+        "_ssl",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

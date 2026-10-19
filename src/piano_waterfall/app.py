@@ -55,7 +55,7 @@ from .workers import ModelDownloadWorker, RenderWorker, TranscriptionWorker
 
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 GITHUB_URL = "https://github.com/Dream-Alan/Piano_Waterfall_Layout"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
         self._volume_before_mute = 80
         self._theme_name = DEFAULT_THEME
         self._voice_key = DEFAULT_VOICE
+        self._engine_key = transcribe.DEFAULT_ENGINE
         self._autoplay = True
         self._resume_at = 0.0
         self._theme_actions: dict[str, QAction] = {}
@@ -395,13 +396,26 @@ class MainWindow(QMainWindow):
         column.setSpacing(10)
 
         intro = QLabel(
-            "内置 hFT-Transformer 模型（22 MB），无需安装 PyTorch。\n"
+            "两种转录引擎：快速 hFT（内置 22 MB）与高精度 CRNN（154 MB，按需下载）。\n"
             "把 MP3 / WAV / FLAC 识别成 MIDI，再用瀑布流播放。",
             panel,
         )
         intro.setObjectName("HintLabel")
         intro.setWordWrap(True)
         column.addWidget(intro)
+
+        engine_row = QHBoxLayout()
+        engine_label = QLabel("转录精度", panel)
+        engine_label.setObjectName("HintLabel")
+        engine_row.addWidget(engine_label)
+        self._engine_combo = QComboBox(panel)
+        for engine in transcribe.ENGINES:
+            self._engine_combo.addItem(transcribe.ENGINE_NAMES[engine], engine)
+        self._engine_combo.setToolTip(
+            "快速引擎体积小、速度快；高精度引擎更完整但需要下载约 154 MB 模型。"
+        )
+        engine_row.addWidget(self._engine_combo, 1)
+        column.addLayout(engine_row)
 
         status_row = QHBoxLayout()
         status_label = QLabel("模型状态", panel)
@@ -447,7 +461,9 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock)
         self._dock.hide()
 
-        self._transcribe_available, self._transcribe_detail = transcribe.availability()
+        self._transcribe_available, self._transcribe_detail = transcribe.availability(
+            self._engine_key
+        )
         self._refresh_model_status()
 
         dock_toggle = self._dock.toggleViewAction()
@@ -462,6 +478,7 @@ class MainWindow(QMainWindow):
         self._transcribe_button.clicked.connect(self._choose_audio)
         self._cancel_button.clicked.connect(self._cancel_transcription)
         self._install_button.clicked.connect(self._confirm_model_download)
+        self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_combo)
         self._voice_combo.currentIndexChanged.connect(self._on_voice_combo)
         self._autoplay_button.toggled.connect(self._on_autoplay_toggled)
@@ -493,6 +510,19 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- settings
     def _restore_settings(self) -> None:
+        engine = str(self._settings.value("engine", transcribe.DEFAULT_ENGINE))
+        if engine not in transcribe.ENGINES:
+            engine = transcribe.DEFAULT_ENGINE
+        self._engine_key = engine
+        index = self._engine_combo.findData(engine)
+        if index < 0:
+            index = self._engine_combo.findData(transcribe.DEFAULT_ENGINE)
+        self._engine_combo.blockSignals(True)
+        self._engine_combo.setCurrentIndex(index)
+        self._engine_combo.blockSignals(False)
+        self._transcribe_available, self._transcribe_detail = transcribe.availability(engine)
+        self._refresh_model_status()
+
         self.set_voice(str(self._settings.value("voice", DEFAULT_VOICE)), reload=False)
         self._set_theme(str(self._settings.value("theme", DEFAULT_THEME)))
 
@@ -547,6 +577,7 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         self._settings.setValue("theme", self._theme_name)
         self._settings.setValue("voice", self._voice_key)
+        self._settings.setValue("engine", self._engine_key)
         self._settings.setValue("autoplay", self._autoplay)
         self._settings.setValue("fall_speed", self._speed_slider.value())
         self._settings.setValue("volume", self._volume_slider.value())
@@ -675,9 +706,15 @@ class MainWindow(QMainWindow):
         if self._clock.playing or abs(current - self._last_painted) > 0.001:
             self.widget.set_time(current)
             self._last_painted = current
-            self._time_label.setText(format_time(current))
+            label = format_time(current)
+            if label != self._time_label.text():
+                self._time_label.setText(label)
             if not self._seeking:
-                self._seek.setValue(int(current * 1000))
+                # 100 ms resolution is enough for a slider and avoids a
+                # layout/repaint storm at 60 fps.
+                milliseconds = int(current * 10) * 100
+                if self._seek.value() != milliseconds:
+                    self._seek.setValue(milliseconds)
 
     def _on_finished(self) -> None:
         self.widget.set_time(self._duration)
@@ -969,10 +1006,33 @@ class MainWindow(QMainWindow):
         else:
             self._dock.hide()
 
+    def _on_engine_changed(self, index: int) -> None:
+        engine = self._engine_combo.itemData(index) or transcribe.DEFAULT_ENGINE
+        if engine == self._engine_key:
+            return
+        if self._transcribe_worker is not None and self._transcribe_worker.isRunning():
+            self._log_transcription("请先等当前转录完成，或点击取消，再切换精度。")
+            previous = self._engine_combo.findData(self._engine_key)
+            if previous >= 0:
+                self._engine_combo.blockSignals(True)
+                self._engine_combo.setCurrentIndex(previous)
+                self._engine_combo.blockSignals(False)
+            return
+        self._engine_key = engine
+        self._transcribe_available, self._transcribe_detail = transcribe.availability(engine)
+        self._refresh_model_status()
+        self._settings.setValue("engine", engine)
+        self._log_transcription(f"已切换到 {transcribe.ENGINE_NAMES[engine]} 转录引擎。")
+
     def _refresh_model_status(self) -> None:
         if self._transcribe_available:
-            self._model_status.setText("已内置 · 22 MB")
-            self._model_status.setToolTip(self._transcribe_detail or "内置 hFT-Transformer 已就绪")
+            model = transcribe.model_path(self._engine_key)
+            size = model.stat().st_size / 1e6 if model is not None else 0.0
+            label = "已内置" if self._engine_key == "hft" else "已下载"
+            self._model_status.setText(f"{label} · {size:.0f} MB")
+            self._model_status.setToolTip(
+                self._transcribe_detail or f"{transcribe.ENGINE_NAMES[self._engine_key]} 已就绪"
+            )
             self._install_button.hide()
             self._dock.setWindowTitle("音频转 MIDI")
             self._transcribe_button.setToolTip("选择音频并转录")
@@ -981,7 +1041,7 @@ class MainWindow(QMainWindow):
             self._model_status.setToolTip(self._transcribe_detail or "")
             self._install_button.show()
             self._dock.setWindowTitle("音频转 MIDI（需要下载模型）")
-            self._transcribe_button.setToolTip("请先下载内置转录模型")
+            self._transcribe_button.setToolTip("请先下载所选引擎的转录模型")
 
     def _on_dock_visibility(self, visible: bool) -> None:
         if visible and not self._transcribe_available and not self._transcribe_log.toPlainText():
@@ -1008,11 +1068,12 @@ class MainWindow(QMainWindow):
     def _confirm_model_download(self) -> None:
         if self._model_worker is not None and self._model_worker.isRunning():
             return
+        size = "22 MB" if self._engine_key == "hft" else "154 MB"
         answer = QMessageBox.question(
             self,
             "下载 AI 转录模型",
-            "内置转录模型缺失或已损坏，需要重新下载（约 22 MB）。\n\n"
-            "下载完成后即可离线使用，是否继续？",
+            f"{transcribe.ENGINE_NAMES[self._engine_key]} 模型尚未下载，"
+            f"需要获取约 {size} 的文件。\n\n下载完成后即可离线使用，是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -1022,8 +1083,11 @@ class MainWindow(QMainWindow):
     def _start_model_download(self) -> None:
         if self._model_worker is not None and self._model_worker.isRunning():
             return
+        size = "22 MB" if self._engine_key == "hft" else "154 MB"
         self._toggle_transcribe_dock(force_open=True)
-        self._log_transcription("开始下载内置转录模型（约 22 MB）…")
+        self._log_transcription(
+            f"开始下载 {transcribe.ENGINE_NAMES[self._engine_key]} 模型（约 {size}）…"
+        )
         self._transcribe_progress.setRange(0, 100)
         self._transcribe_progress.setValue(0)
         self._transcribe_progress.show()
@@ -1033,7 +1097,7 @@ class MainWindow(QMainWindow):
         self._install_button.setEnabled(False)
         self.statusBar().showMessage("正在下载 AI 模型…")
 
-        worker = ModelDownloadWorker(self)
+        worker = ModelDownloadWorker(self._engine_key, self)
         self._model_worker = worker
         worker.progress.connect(self._on_model_progress)
         worker.succeeded.connect(self._on_model_downloaded)
@@ -1061,7 +1125,9 @@ class MainWindow(QMainWindow):
 
     def _on_model_downloaded(self, path: str) -> None:
         self._finish_model_ui()
-        self._transcribe_available, self._transcribe_detail = transcribe.availability()
+        self._transcribe_available, self._transcribe_detail = transcribe.availability(
+            self._engine_key
+        )
         self._refresh_model_status()
         self._log_transcription(f"模型下载完成：{path}")
         self.statusBar().showMessage("AI 模型已就绪，可以开始转录", 5000)
@@ -1122,7 +1188,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"正在转录 {audio.name}…")
 
         midi_path = transcriptions_dir() / f"{audio.stem}.mid"
-        worker = TranscriptionWorker(audio, midi_path, self)
+        worker = TranscriptionWorker(audio, midi_path, self._engine_key, self)
         self._transcribe_worker = worker
         worker.progress.connect(self._on_transcribe_progress)
         worker.succeeded.connect(self._on_transcribe_succeeded)
@@ -1218,9 +1284,11 @@ class MainWindow(QMainWindow):
             "tonejs-instruments</a> 的 VSCO 2 Community Edition 采样（CC-BY 3.0），"
             "本项目做了裁剪、单声道化与响度归一化；瀑布流渲染、播放控制与界面为原创实现"
             "（MIT License）。<br>"
-            "音频转 MIDI 使用 Sony 的 "
-            "<a href='https://github.com/sony/hFT-Transformer'>hFT-Transformer</a>"
-            "（MIT License），在应用内以 ONNX Runtime 本地运行，无需 PyTorch。</p>"
+            "音频转 MIDI 提供两种引擎：Sony "
+            "<a href='https://github.com/sony/hFT-Transformer'>hFT-Transformer</a>（MIT）"
+            "与 Kong 等人的 CRNN（MIT，ONNX 权重来自 "
+            "<a href='https://huggingface.co/stelee/piano-transcription-onnx'>stelee</a>），"
+            "都在应用内以 ONNX Runtime 本地运行，无需 PyTorch。</p>"
             f"<p><a href='{GITHUB_URL}'>{GITHUB_URL}</a></p>"
             "<p style='color:#8fa3b8'>用 PySide6 与 NumPy 构建，可在 Windows / macOS / Linux 运行。</p>"
         )
@@ -1286,17 +1354,17 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def _transcribe_cli(audio: Path, output: str | None) -> int:
+def _transcribe_cli(audio: Path, output: str | None, engine: str = "hft") -> int:
     """Headless audio-to-MIDI path, also used to smoke-test frozen builds."""
 
     import faulthandler
 
-    from . import hft
+    from . import transcribe
 
     log_path = transcriptions_dir() / "transcribe-cli.log"
     log = log_path.open("w", encoding="utf-8", buffering=1)
     faulthandler.enable(file=log)
-    faulthandler.dump_traceback_later(240, exit=True, file=log)
+    faulthandler.dump_traceback_later(300, exit=True, file=log)
 
     def emit(message: str) -> None:
         print(message, file=log)
@@ -1309,7 +1377,8 @@ def _transcribe_cli(audio: Path, output: str | None) -> int:
             return 2
         destination = Path(output) if output else transcriptions_dir() / f"{audio.stem}.mid"
         emit(f"音频：{audio}")
-        emit(f"模型：{hft.model_path()}")
+        emit(f"引擎：{transcribe.ENGINE_NAMES[engine]}")
+        emit(f"模型：{transcribe.model_path(engine)}")
         last = -1
 
         def progress(fraction: float, message: str) -> None:
@@ -1320,7 +1389,7 @@ def _transcribe_cli(audio: Path, output: str | None) -> int:
                 emit(f"[{percent:3d}%] {message}")
 
         try:
-            result = hft.transcribe(audio, destination, progress=progress)
+            result = transcribe.transcribe(audio, destination, engine=engine, progress=progress)
         except Exception as exc:
             emit(f"转录失败：{exc}")
             log.write(traceback.format_exc())
@@ -1330,6 +1399,22 @@ def _transcribe_cli(audio: Path, output: str | None) -> int:
     finally:
         faulthandler.cancel_dump_traceback_later()
         log.close()
+
+
+def _download_model_cli(engine: str) -> int:
+    from . import transcribe
+
+    def progress(done: int, total: int) -> None:
+        if total:
+            print(f"\r下载模型 {done / 1e6:.1f} / {total / 1e6:.1f} MB", end="", flush=True)
+
+    try:
+        path = transcribe.download_model(engine, progress=progress)
+    except Exception as exc:
+        print(f"\n下载失败：{exc}", file=sys.stderr)
+        return 1
+    print(f"\n模型已保存：{path}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1355,6 +1440,17 @@ def main(argv: list[str] | None = None) -> int:
         help="transcribe an audio file to MIDI without opening the window",
     )
     parser.add_argument(
+        "--engine",
+        default="hft",
+        choices=["hft", "crnn"],
+        help="transcription engine for --transcribe (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--download-model",
+        action="store_true",
+        help="download the model for --engine, then exit",
+    )
+    parser.add_argument(
         "--out",
         metavar="MIDI",
         help="output path for --transcribe (default: app data directory)",
@@ -1367,7 +1463,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.transcribe:
-        return _transcribe_cli(Path(args.transcribe), args.out)
+        return _transcribe_cli(Path(args.transcribe), args.out, args.engine)
+
+    if args.download_model:
+        return _download_model_cli(args.engine)
 
     app = QApplication([arguments[0]])
     app.setApplicationName(APP_NAME)

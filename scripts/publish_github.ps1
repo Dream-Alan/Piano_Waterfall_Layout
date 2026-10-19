@@ -14,14 +14,14 @@
 .EXAMPLE
     # Optional: also tag v1.1.0, which triggers the release workflow on GitHub.
     powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
-        -RepoUrl git@github.com:Dream-Alan/Piano_Waterfall_Layout.git -Tag v1.3.0
+        -RepoUrl git@github.com:Dream-Alan/Piano_Waterfall_Layout.git -Tag v1.4.0
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$RepoUrl,
     [string]$Branch = "main",
-    [string]$Message = "Piano Waterfall 1.3.0",
+    [string]$Message = "Piano Waterfall 1.4.0",
     [string]$Tag = "",
     [string]$UserName = "",
     [string]$UserEmail = ""

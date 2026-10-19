@@ -21,10 +21,17 @@ class TranscriptionWorker(QThread):
     succeeded = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, audio_path: str | Path, midi_path: str | Path, parent=None):
+    def __init__(
+        self,
+        audio_path: str | Path,
+        midi_path: str | Path,
+        engine: str = "hft",
+        parent=None,
+    ):
         super().__init__(parent)
         self.audio_path = Path(audio_path)
         self.midi_path = Path(midi_path)
+        self.engine = engine
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -35,6 +42,7 @@ class TranscriptionWorker(QThread):
             result = transcribe.transcribe(
                 self.audio_path,
                 self.midi_path,
+                engine=self.engine,
                 progress=lambda fraction, message: self.progress.emit(fraction, message),
                 should_cancel=lambda: self._cancelled,
             )
@@ -47,28 +55,30 @@ class TranscriptionWorker(QThread):
 
 
 class ModelDownloadWorker(QThread):
-    """Fetch the bundled transcription model if it is missing or damaged."""
+    """Fetch a transcription model if it is missing or damaged."""
 
     progress = Signal(int, int)
     succeeded = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, engine: str = "hft", parent=None):
         super().__init__(parent)
+        self.engine = engine
         self._cancelled = False
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def run(self) -> None:
-        from . import hft
+        from . import transcribe
 
         try:
-            path = hft.download_model(
+            path = transcribe.download_model(
+                self.engine,
                 progress=lambda done, total: self.progress.emit(done, total),
                 should_cancel=lambda: self._cancelled,
             )
-        except hft.TranscriptionCancelled:
+        except transcribe.TranscriptionCancelled:
             self.failed.emit("已取消下载")
         except Exception as exc:  # pragma: no cover - UI path
             traceback.print_exc()

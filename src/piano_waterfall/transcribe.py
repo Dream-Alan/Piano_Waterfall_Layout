@@ -1,9 +1,14 @@
 """Audio-to-MIDI transcription facade.
 
-The old implementation needed PyTorch, librosa and a 200 MB model download.
-The app now ships Sony's hFT-Transformer as a 22 MB ONNX model, so the only
-runtime dependency is onnxruntime.  This module keeps the historical public
-names so the UI and tests have a single, stable import point.
+Two engines are available:
+
+``"hft"``
+    Sony's hFT-Transformer, bundled as a 22 MB ONNX model.  Fast and small.
+``"crnn"``
+    Kong et al.'s CRNN, exported to a 154 MB ONNX model.  More accurate, but
+    downloaded on demand and stored in the user data directory.
+
+The historical public names remain so the UI and tests have one import point.
 """
 
 from __future__ import annotations
@@ -11,10 +16,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from . import hft
+from . import crnn, hft
 
 TranscriptionUnavailable = hft.TranscriptionUnavailable
 TranscriptionCancelled = hft.TranscriptionCancelled
+
+ENGINES = ("hft", "crnn")
+DEFAULT_ENGINE = "hft"
+ENGINE_NAMES = {"hft": "快速 · hFT-Transformer", "crnn": "高精度 · CRNN"}
 
 INSTALL_HINT = (
     "内置转录组件不完整（模型或 onnxruntime 缺失）。\n"
@@ -23,38 +32,48 @@ INSTALL_HINT = (
 )
 
 
-def availability() -> tuple[bool, str]:
-    return hft.availability()
+def _module(engine: str):
+    if engine == "crnn":
+        return crnn
+    return hft
 
 
-def model_path() -> Path | None:
-    return hft.model_path()
+def availability(engine: str = DEFAULT_ENGINE) -> tuple[bool, str]:
+    return _module(engine).availability()
+
+
+def model_path(engine: str = DEFAULT_ENGINE) -> Path | None:
+    return _module(engine).model_path()
 
 
 def download_model(
+    engine: str = DEFAULT_ENGINE,
     *,
     progress: Callable[[int, int], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Path:
-    return hft.download_model(progress=progress, should_cancel=should_cancel)
+    return _module(engine).download_model(progress=progress, should_cancel=should_cancel)
 
 
 def transcribe(
     audio_path: str | Path,
     midi_path: str | Path,
     *,
+    engine: str = DEFAULT_ENGINE,
     device: str = "cpu",
     progress: Callable[[float, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Path:
-    """Transcribe ``audio_path`` to ``midi_path``.
+    """Transcribe ``audio_path`` to ``midi_path`` with the chosen engine.
 
-    ``device`` is accepted for backwards compatibility (the ONNX model always
-    runs on the CPU; PyTorch is no longer involved).
+    ``device`` is accepted for backwards compatibility (ONNX always runs on
+    the CPU; PyTorch is no longer involved).
     """
 
     del device
-    return hft.transcribe(
+    if engine not in ENGINES:
+        raise ValueError(f"未知的转录引擎：{engine}")
+    return _module(engine).transcribe(
         audio_path,
         midi_path,
         progress=progress,

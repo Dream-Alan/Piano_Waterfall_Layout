@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--size", default="1280x800")
     parser.add_argument("--theme", default="neon")
     parser.add_argument("--voice", default="grand")
+    parser.add_argument("--engine", default="hft", choices=["hft", "crnn"])
     parser.add_argument("--dock", action="store_true", help="show the transcription dock")
     args = parser.parse_args()
 
@@ -48,6 +49,9 @@ def main() -> int:
     window._set_theme(args.theme)  # noqa: SLF001 - dev helper
     window._dock.setVisible(args.dock)  # noqa: SLF001 - ignore saved layout
     window.set_voice(args.voice, reload=False)
+    index = window._engine_combo.findData(args.engine)  # noqa: SLF001
+    if index >= 0:
+        window._engine_combo.setCurrentIndex(index)  # noqa: SLF001
     window._autoplay_button.setChecked(True)  # noqa: SLF001 - docs screenshot
     window.load_midi(args.midi, autoplay=False)
 
