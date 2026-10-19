@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "piano-waterfall"
-version = "1.1.0"
+version = "1.2.0"
 description = "Turn MIDI files or piano recordings into a neon waterfall player."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,7 +59,11 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-piano_waterfall = ["assets/*"]
+piano_waterfall = [
+    "assets/*",
+    "assets/samples/ATTRIBUTION.md",
+    "assets/samples/piano/*.wav",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

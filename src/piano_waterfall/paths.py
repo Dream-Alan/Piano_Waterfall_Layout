@@ -12,7 +12,7 @@ from pathlib import Path
 from .synth import SynthSettings
 
 APP_NAME = "PianoWaterfall"
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 DATA_DIR_ENV = "PIANO_WATERFALL_DATA_DIR"
 
 

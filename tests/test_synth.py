@@ -6,6 +6,13 @@ import numpy as np
 import pytest
 
 from piano_waterfall.midi_io import Note, Song
+from piano_waterfall.samples import (
+    SAMPLES_ENV,
+    SampleBankMissing,
+    bank,
+    clear_cache,
+    sample_for,
+)
 from piano_waterfall.synth import (
     DEFAULT_SETTINGS,
     DEFAULT_VOICE,
@@ -77,9 +84,13 @@ def test_voice_presets_are_well_defined() -> None:
     for key, voice in VOICES.items():
         assert voice.key == key
         assert voice.name and voice.description
-        assert 4 <= voice.partials <= 32
-        assert 0.001 <= voice.attack <= 0.05
-        assert voice.decay > 0 and voice.gain > 0
+        assert voice.lowpass_hz is None or 400 <= voice.lowpass_hz <= 8000
+        assert -12 <= voice.high_shelf_db <= 12
+        assert -12 <= voice.low_shelf_db <= 12
+        assert 0.0005 <= voice.attack <= 0.03
+        assert 0.04 <= voice.release <= 0.4
+        assert 0 <= voice.presence_db <= 8
+        assert voice.gain > 0
 
 
 def test_unknown_voice_falls_back_to_default() -> None:
@@ -100,6 +111,33 @@ def test_every_voice_renders() -> None:
         audio = render_song(_song(), replace(TINY, voice=key))
         assert np.isfinite(audio).all()
         assert float(np.max(np.abs(audio))) > 0.001
+
+
+def test_bundled_sample_bank_covers_piano_range() -> None:
+    mapping, roots = bank()
+    assert len(roots) >= 20
+    assert roots[0] <= 36
+    assert roots[-1] >= 96
+    assert all(path.exists() for path in mapping.values())
+
+
+def test_sample_for_transposes_and_stays_finite() -> None:
+    root = sample_for(60, 22_050)
+    higher = sample_for(61, 22_050)
+    lower = sample_for(59, 22_050)
+    assert root.size > 1000
+    assert higher.size < root.size < lower.size
+    assert np.isfinite(higher).all() and np.isfinite(lower).all()
+
+
+def test_missing_bank_raises(monkeypatch, tmp_path) -> None:
+    clear_cache()
+    monkeypatch.setenv(SAMPLES_ENV, str(tmp_path / "empty"))
+    try:
+        with pytest.raises(SampleBankMissing):
+            bank()
+    finally:
+        clear_cache()
 
 
 def test_write_wav_accepts_part_suffix(tmp_path) -> None:

@@ -14,6 +14,10 @@ def test_main_window_builds(qapp, monkeypatch, tmp_path) -> None:
         assert window._clock.loaded is False
         assert APP_VERSION.count(".") >= 1
         assert window._voice_combo.count() == len(VOICES)
+        assert window._autoplay_button.isChecked()
+        assert window._autoplay is True
+        window._autoplay_button.setChecked(False)
+        assert window._autoplay is False
         window.set_voice("felt", reload=False)
         assert window._voice_key == "felt"
         assert window._synth_settings().voice == "felt"

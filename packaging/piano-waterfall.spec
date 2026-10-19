@@ -18,6 +18,8 @@ ffmpeg_binaries = [
 datas = [
     (str(ROOT / "assets" / "icon.png"), "assets"),
     (str(ROOT / "assets" / "icon.ico"), "assets"),
+    (str(ROOT / "src" / "piano_waterfall" / "assets" / "samples" / "piano"), "assets/samples/piano"),
+    (str(ROOT / "src" / "piano_waterfall" / "assets" / "samples" / "ATTRIBUTION.md"), "assets/samples"),
 ]
 
 a = Analysis(

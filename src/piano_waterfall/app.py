@@ -54,7 +54,7 @@ from .workers import RenderWorker, TranscriptionWorker
 
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 GITHUB_URL = "https://github.com/Dream-Alan/piano-waterfall"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
         self._volume_before_mute = 80
         self._theme_name = DEFAULT_THEME
         self._voice_key = DEFAULT_VOICE
+        self._autoplay = True
         self._resume_at = 0.0
         self._theme_actions: dict[str, QAction] = {}
         self._closing = False
@@ -190,6 +191,14 @@ class MainWindow(QMainWindow):
         self._transcribe_button_top.setObjectName("SecondaryButton")
         self._transcribe_button_top.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         row.addWidget(self._transcribe_button_top)
+
+        self._autoplay_button = QPushButton("自动播放", bar)
+        self._autoplay_button.setObjectName("ToggleButton")
+        self._autoplay_button.setCheckable(True)
+        self._autoplay_button.setChecked(True)
+        self._autoplay_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._autoplay_button.setToolTip("打开文件后自动播放，可随时开关")
+        row.addWidget(self._autoplay_button)
 
         self._voice_combo = QComboBox(bar)
         self._voice_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -455,6 +464,7 @@ class MainWindow(QMainWindow):
         self._copy_hint_button.clicked.connect(self._copy_install_hint)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_combo)
         self._voice_combo.currentIndexChanged.connect(self._on_voice_combo)
+        self._autoplay_button.toggled.connect(self._on_autoplay_toggled)
         self._fullscreen_button.clicked.connect(self._toggle_fullscreen)
         self._play_button.clicked.connect(self._toggle_play)
         self._restart_button.clicked.connect(self._restart)
@@ -485,6 +495,12 @@ class MainWindow(QMainWindow):
     def _restore_settings(self) -> None:
         self.set_voice(str(self._settings.value("voice", DEFAULT_VOICE)), reload=False)
         self._set_theme(str(self._settings.value("theme", DEFAULT_THEME)))
+
+        autoplay = _as_bool(self._settings.value("autoplay", True), True)
+        self._autoplay = autoplay
+        self._autoplay_button.blockSignals(True)
+        self._autoplay_button.setChecked(autoplay)
+        self._autoplay_button.blockSignals(False)
 
         self._speed_slider.blockSignals(True)
         self._speed_slider.setValue(_as_int(self._settings.value("fall_speed", 430), 430))
@@ -531,6 +547,7 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         self._settings.setValue("theme", self._theme_name)
         self._settings.setValue("voice", self._voice_key)
+        self._settings.setValue("autoplay", self._autoplay)
         self._settings.setValue("fall_speed", self._speed_slider.value())
         self._settings.setValue("volume", self._volume_slider.value())
         self._settings.setValue("rate", self._rate_combo.currentData())
@@ -540,6 +557,18 @@ class MainWindow(QMainWindow):
         self._settings.setValue("last_dir", self._last_dir)
 
     # --------------------------------------------------------------- theming
+    def _on_autoplay_toggled(self, checked: bool) -> None:
+        self._autoplay = bool(checked)
+        self._settings.setValue("autoplay", self._autoplay)
+        if not self._autoplay:
+            self._pending_play = False
+        self.statusBar().showMessage(
+            "自动播放已开启：打开文件后立即播放"
+            if self._autoplay
+            else "自动播放已关闭：打开文件后停在开头",
+            2500,
+        )
+
     def _on_voice_combo(self, index: int) -> None:
         key = self._voice_combo.itemData(index)
         if key:
@@ -732,7 +761,7 @@ class MainWindow(QMainWindow):
         self._last_dir = str(Path(path).parent)
         self.open_path(path)
 
-    def open_path(self, path: str | Path, *, autoplay: bool = True) -> None:
+    def open_path(self, path: str | Path, *, autoplay: bool | None = None) -> None:
         target = Path(path)
         if not target.is_file():
             QMessageBox.warning(self, "文件不存在", f"找不到文件：\n{target}")
@@ -749,7 +778,7 @@ class MainWindow(QMainWindow):
                 f"无法识别 {target.suffix or '该'} 格式。\n可以打开 MIDI，或 MP3 / WAV / FLAC 等音频。",
             )
 
-    def load_midi(self, path: str | Path, *, autoplay: bool = True) -> None:
+    def load_midi(self, path: str | Path, *, autoplay: bool | None = None) -> None:
         target = Path(path)
         try:
             song = parse_midi(target)
@@ -766,7 +795,7 @@ class MainWindow(QMainWindow):
         self._midi_path = target
         self._duration = song.duration
         self._last_painted = -1.0
-        self._pending_play = bool(autoplay)
+        self._pending_play = self._autoplay if autoplay is None else bool(autoplay)
         self._resume_at = 0.0
 
         self.widget.set_song(song, title=target.stem)
@@ -840,6 +869,12 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"音频合成失败，改为静音播放：{message}", 10000)
         self._log_transcription(f"音频合成失败（将静音播放）：{message}")
+        QMessageBox.warning(
+            self,
+            "音频合成失败",
+            f"{message}\n\n瀑布流仍可播放，但这次没有声音。\n"
+            "如果文件放在只读目录，请把音频缓存目录设到可写位置。",
+        )
         if self._song is not None:
             self._load_silent_audio(self._song)
 
@@ -1024,7 +1059,7 @@ class MainWindow(QMainWindow):
         self._finish_transcription_ui()
         self._log_transcription(f"完成，MIDI 已保存到：{midi_path}")
         self.statusBar().showMessage("转录完成，正在打开 MIDI", 5000)
-        self.load_midi(Path(midi_path), autoplay=True)
+        self.load_midi(Path(midi_path), autoplay=self._autoplay)
 
     def _on_transcribe_failed(self, message: str) -> None:
         self._finish_transcription_ui()
@@ -1086,7 +1121,10 @@ class MainWindow(QMainWindow):
             f"<h2 style='margin-bottom:2px'>Piano Waterfall "
             f"<span style='color:{theme.accent};font-size:13px'>v{APP_VERSION}</span></h2>"
             f"<p style='color:#8fa3b8;margin-top:0'>{APP_TAGLINE} · 把音乐变成下落的霓虹音符</p>"
-            "<p>MIDI 解析、钢琴音色合成、瀑布流渲染与播放控制均为本项目的原创实现（MIT License）。<br>"
+            "<p>钢琴音色基于 <a href='https://github.com/nbrosowsky/tonejs-instruments'>"
+            "tonejs-instruments</a> 的 VSCO 2 Community Edition 采样（CC-BY 3.0），"
+            "本项目做了裁剪、单声道化与响度归一化；瀑布流渲染、播放控制与界面为原创实现"
+            "（MIT License）。<br>"
             "音频转 MIDI 基于 Qiuqiang Kong 的 "
             "<a href='https://github.com/qiuqiangkong/piano_transcription_inference'>"
             "piano_transcription_inference</a>（MIT License）。</p>"

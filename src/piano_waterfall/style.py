@@ -96,6 +96,22 @@ def build_stylesheet(theme: Theme) -> str:
         border-color: rgba(255, 255, 255, 0.10);
         background: rgba(255, 255, 255, 0.03);
     }}
+    QPushButton#ToggleButton {{
+        background: transparent;
+        color: rgba(232, 246, 255, 0.50);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        padding: 6px 10px;
+    }}
+    QPushButton#ToggleButton:hover {{
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(232, 246, 255, 0.82);
+    }}
+    QPushButton#ToggleButton:checked {{
+        background: {accent_faint};
+        color: {accent};
+        border-color: {accent_soft};
+        font-weight: 600;
+    }}
     QPushButton#IconButton {{
         background: transparent;
         border: none;
