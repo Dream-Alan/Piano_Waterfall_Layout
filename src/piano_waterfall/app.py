@@ -55,8 +55,10 @@ from .workers import ModelDownloadWorker, RenderWorker, TranscriptionWorker
 
 APP_NAME = "Piano Waterfall"
 APP_TAGLINE = "钢琴瀑布流"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 GITHUB_URL = "https://github.com/Dream-Alan/Piano_Waterfall_Layout"
+DEVELOPER_NAME = "Dream-Alan"
+DEVELOPER_URL = "https://github.com/Dream-Alan"
 
 MIDI_SUFFIXES = {".mid", ".midi"}
 AUDIO_SUFFIXES = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
@@ -1280,6 +1282,8 @@ class MainWindow(QMainWindow):
             f"<h2 style='margin-bottom:2px'>Piano Waterfall "
             f"<span style='color:{theme.accent};font-size:13px'>v{APP_VERSION}</span></h2>"
             f"<p style='color:#8fa3b8;margin-top:0'>{APP_TAGLINE} · 把音乐变成下落的霓虹音符</p>"
+            f"<p style='color:#8fa3b8;margin-top:0'>开发者："
+            f"<a href='{DEVELOPER_URL}' style='color:{theme.accent}'>{DEVELOPER_NAME}</a></p>"
             "<p>钢琴音色基于 <a href='https://github.com/nbrosowsky/tonejs-instruments'>"
             "tonejs-instruments</a> 的 VSCO 2 Community Edition 采样（CC-BY 3.0），"
             "本项目做了裁剪、单声道化与响度归一化；瀑布流渲染、播放控制与界面为原创实现"

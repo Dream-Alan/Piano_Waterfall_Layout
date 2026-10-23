@@ -195,10 +195,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish_github.ps1 `
-  -RepoUrl https://github.com/Dream-Alan/Piano_Waterfall_Layout.git -Tag v1.4.0
+  -RepoUrl https://github.com/Dream-Alan/Piano_Waterfall_Layout.git -Tag v1.4.1
 ```
 
-脚本会初始化仓库、提交、推送 `main` 和 `v1.4.0` 标签；标签会触发
+脚本会初始化仓库、提交、推送 `main` 和 `v1.4.1` 标签；标签会触发
 `.github/workflows/release.yml` 自动构建 Windows zip 并创建 Release。
 如果仓库名或用户名不同，把上面的地址和项目里的 `Dream-Alan` 一起替换掉即可。
 
